@@ -3,14 +3,11 @@ services:
     build: .
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      NODE_ENV: development
-      PORT: 8000
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USERNAME: postgres
-      DB_PASSWORD: postgres
-      DB_NAME: ClauseGuard
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ClauseGuard
     depends_on:
       postgres:

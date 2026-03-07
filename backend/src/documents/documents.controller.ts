@@ -21,6 +21,7 @@ import { diskStorage } from 'multer';
 import type { Response, Request as ExpressRequest } from 'express';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { DocumentsService } from './documents.service.js';
 import { DocumentEventsService } from './document-events.service.js';
@@ -38,6 +39,8 @@ const ALLOWED_MIMES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ];
 
+@ApiTags('Documents')
+@ApiBearerAuth()
 @Controller('documents')
 @UseGuards(JwtAuthGuard)
 export class DocumentsController {
@@ -52,6 +55,18 @@ export class DocumentsController {
    * Processing runs async in background.
    */
   @Post('upload')
+  @ApiOperation({ summary: 'Upload a PDF or DOCX contract for analysis' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary', description: 'PDF or DOCX file (max 20MB)' },
+        hipaaMode: { type: 'boolean', description: 'Enable HIPAA PII redaction before AI processing' },
+      },
+      required: ['file'],
+    },
+  })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -106,6 +121,9 @@ export class DocumentsController {
    * List current user's documents.
    */
   @Get()
+  @ApiOperation({ summary: 'List current user\'s documents' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   async list(
     @Request() req: AuthenticatedRequest,
     @Query('page') page?: string,
@@ -121,6 +139,7 @@ export class DocumentsController {
    * Get a single document's details.
    */
   @Get(':id')
+  @ApiOperation({ summary: 'Get a single document by ID' })
   async findOne(
     @Request() req: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
@@ -140,6 +159,7 @@ export class DocumentsController {
    * SSE endpoint — streams real-time pipeline progress.
    */
   @Get(':id/status')
+  @ApiOperation({ summary: 'SSE stream of document processing progress' })
   async status(
     @Request() req: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
