@@ -6,7 +6,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service.js';
 import { AuthController } from './auth.controller.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
+import { GoogleStrategy } from './strategies/google.strategy.js';
 import { User } from '../entities/user.entity.js';
+
+const googleProviders = process.env.GOOGLE_CLIENT_ID
+  ? [GoogleStrategy]
+  : [];
 
 @Module({
   imports: [
@@ -24,7 +29,7 @@ import { User } from '../entities/user.entity.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, ...googleProviders],
   exports: [AuthService, JwtStrategy, PassportModule],
 })
 export class AuthModule {}
