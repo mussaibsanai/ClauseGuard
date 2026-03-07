@@ -34,10 +34,11 @@ const ALL_ENTITIES = [User, Document, Analysis, RedactToken, AuditLog];
         };
 
         if (databaseUrl) {
+          const sslEnabled = config.get('DB_SSL') !== 'false';
           return {
             ...base,
             url: databaseUrl,
-            ssl: isProduction ? { rejectUnauthorized: false } : false,
+            ssl: sslEnabled ? { rejectUnauthorized: false } : false,
           };
         }
 

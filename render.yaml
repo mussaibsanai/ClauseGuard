@@ -28,5 +28,7 @@ services:
         sync: false
       - key: ENCRYPTION_KEY
         sync: false
+      - key: DB_SSL
+        value: "true"
       - key: TYPEORM_SYNC
         value: "true"
