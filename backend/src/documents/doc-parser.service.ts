@@ -8,30 +8,34 @@ export class DocParserService {
 
   async extractText(filePath: string): Promise<string> {
     const ext = path.extname(filePath).toLowerCase();
+    const buffer = fs.readFileSync(filePath);
+    return this.extractFromBuffer(buffer, filePath);
+  }
+
+  async extractFromBuffer(buffer: Buffer, fileName: string): Promise<string> {
+    const ext = path.extname(fileName).toLowerCase();
 
     switch (ext) {
       case '.pdf':
-        return this.parsePdf(filePath);
+        return this.parsePdfBuffer(buffer);
       case '.docx':
-        return this.parseDocx(filePath);
+        return this.parseDocxBuffer(buffer);
       default:
         throw new Error(`Unsupported file type: ${ext}`);
     }
   }
 
-  private async parsePdf(filePath: string): Promise<string> {
-    this.logger.log(`Parsing PDF: ${filePath}`);
+  private async parsePdfBuffer(buffer: Buffer): Promise<string> {
+    this.logger.log('Parsing PDF from buffer');
     const { PDFParse } = await import('pdf-parse');
-    const buffer = fs.readFileSync(filePath);
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
     return result.text;
   }
 
-  private async parseDocx(filePath: string): Promise<string> {
-    this.logger.log(`Parsing DOCX: ${filePath}`);
+  private async parseDocxBuffer(buffer: Buffer): Promise<string> {
+    this.logger.log('Parsing DOCX from buffer');
     const mammoth = await import('mammoth');
-    const buffer = fs.readFileSync(filePath);
     const result = await mammoth.extractRawText({ buffer });
     return result.value;
   }

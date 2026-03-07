@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as fs from 'fs';
 import { Document, DocumentStatus } from '../entities/document.entity.js';
 import { DocParserService } from './doc-parser.service.js';
 import { DocumentEventsService } from './document-events.service.js';
+import { StorageService } from '../storage/storage.service.js';
 
 @Injectable()
 export class DocumentsService {
@@ -20,6 +20,7 @@ export class DocumentsService {
     private readonly docRepo: Repository<Document>,
     private readonly docParser: DocParserService,
     private readonly events: DocumentEventsService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -39,8 +40,14 @@ export class DocumentsService {
     });
     await this.docRepo.save(doc);
 
+    // Upload file to object storage (or keep on disk if local)
+    const ext = file.originalname.split('.').pop() || 'bin';
+    const storagePath = `${userId}/${doc.id}.${ext}`;
+    const resolvedPath = await this.storage.upload(file.path, storagePath);
+    await this.docRepo.update(doc.id, { storagePath: resolvedPath });
+
     // Fire-and-forget: do NOT await
-    this.processDocument(doc.id, file.path).catch((err) => {
+    this.processDocument(doc.id, resolvedPath).catch((err) => {
       this.logger.error(
         `Pipeline failed for document ${doc.id}: ${err.message}`,
         err.stack,
@@ -88,12 +95,13 @@ export class DocumentsService {
 
   private async processDocument(
     documentId: string,
-    filePath: string,
+    storagePath: string,
   ): Promise<void> {
     try {
       // Step 1: Extract text
       await this.updateStatus(documentId, DocumentStatus.EXTRACTING);
-      const rawText = await this.docParser.extractText(filePath);
+      const fileBuffer = await this.storage.download(storagePath);
+      const rawText = await this.docParser.extractFromBuffer(fileBuffer, storagePath);
 
       await this.docRepo.update(documentId, { rawText });
       this.logger.log(
@@ -127,16 +135,6 @@ export class DocumentsService {
         err.stack,
       );
       await this.updateStatus(documentId, DocumentStatus.ERROR, err.message);
-    } finally {
-      // Clean up temp file
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          this.logger.log(`Deleted temp file: ${filePath}`);
-        }
-      } catch {
-        // non-critical
-      }
     }
   }
 
