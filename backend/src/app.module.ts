@@ -5,6 +5,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
+import { StorageModule } from './storage/storage.module.js';
 import { User } from './entities/user.entity.js';
 import { Document } from './entities/document.entity.js';
 import { Analysis } from './entities/analysis.entity.js';
@@ -52,6 +53,7 @@ const ALL_ENTITIES = [User, Document, Analysis, RedactToken, AuditLog];
         };
       },
     }),
+    StorageModule,
     AuthModule,
     DocumentsModule,
   ],

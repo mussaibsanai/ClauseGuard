@@ -32,6 +32,9 @@ export class Document extends BaseEntity {
   @Column({ name: 'hipaa_mode', type: 'boolean', default: false })
   hipaaMode: boolean;
 
+  @Column({ name: 'storage_path', type: 'varchar', length: 1000, nullable: true })
+  storagePath: string | null;
+
   @Column({ name: 'raw_text', type: 'text', nullable: true })
   rawText: string | null;
 
