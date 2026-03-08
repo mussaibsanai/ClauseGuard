@@ -9,5 +9,6 @@ dist/
 coverage/
 uploads/
 P1_ClauseGuard.pdf
+out/
 .opencode/
 CLAUDE.md
