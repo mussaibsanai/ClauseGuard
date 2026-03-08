@@ -7,33 +7,45 @@ import {
   Body,
   UseGuards,
   UseInterceptors,
-  UploadedFile,
-  ParseFilePipe,
-  FileTypeValidator,
-  MaxFileSizeValidator,
+  UploadedFiles,
   Request,
   Res,
   BadRequestException,
+  ForbiddenException,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import type { Response, Request as ExpressRequest } from 'express';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiBody,
+  ApiQuery,
+  ApiPayloadTooLargeResponse,
+  ApiTooManyRequestsResponse,
+  ApiForbiddenResponse,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { DocumentsService } from './documents.service.js';
 import { DocumentEventsService } from './document-events.service.js';
 import { UploadDto } from './dto/upload.dto.js';
 import { User } from '../entities/user.entity.js';
+import { getTierLimits } from '../config/tier-limits.js';
 
 interface AuthenticatedRequest extends ExpressRequest {
   user: User;
 }
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+// Accept up to 50MB at Multer level (the pro max).
+// Per-tier file size enforcement happens in DocumentsService.
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILES = 5; // Pro limit; free users are blocked in the handler
 const ALLOWED_MIMES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -51,24 +63,34 @@ export class DocumentsController {
 
   /**
    * POST /api/documents/upload
-   * Multipart file upload. Returns document metadata immediately.
-   * Processing runs async in background.
+   * Multipart file upload (1 file for free, up to 5 for pro).
+   * Returns document metadata immediately; processing runs async.
    */
   @Post('upload')
-  @ApiOperation({ summary: 'Upload a PDF or DOCX contract for analysis' })
+  @ApiOperation({ summary: 'Upload PDF or DOCX contracts for analysis' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
-        file: { type: 'string', format: 'binary', description: 'PDF or DOCX file (max 20MB)' },
-        hipaaMode: { type: 'boolean', description: 'Enable HIPAA PII redaction before AI processing' },
+        files: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+          description: 'PDF or DOCX files (1 for free, up to 5 for pro)',
+        },
+        hipaaMode: {
+          type: 'boolean',
+          description: 'Enable HIPAA PII redaction before AI processing',
+        },
       },
-      required: ['file'],
+      required: ['files'],
     },
   })
+  @ApiPayloadTooLargeResponse({ description: 'File size exceeds tier limit' })
+  @ApiTooManyRequestsResponse({ description: 'Daily upload limit reached' })
+  @ApiForbiddenResponse({ description: 'Storage limit reached or multi-file not allowed' })
   @UseInterceptors(
-    FileInterceptor('file', {
+    FilesInterceptor('files', MAX_FILES, {
       storage: diskStorage({
         destination: UPLOAD_DIR,
         filename: (_req, file, cb) => {
@@ -94,26 +116,43 @@ export class DocumentsController {
   )
   async upload(
     @Request() req: AuthenticatedRequest,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFiles() files: Express.Multer.File[],
     @Body() dto: UploadDto,
   ) {
-    if (!file) {
-      throw new BadRequestException('File is required');
+    if (!files || files.length === 0) {
+      throw new BadRequestException('At least one file is required');
     }
 
-    const doc = await this.documentsService.upload(
-      req.user.id,
-      file,
-      dto.hipaaMode ?? false,
-    );
+    // Enforce per-upload file count limit by tier
+    const limits = getTierLimits(req.user.tier);
+    if (files.length > limits.maxFilesPerUpload) {
+      throw new ForbiddenException(
+        limits.maxFilesPerUpload === 1
+          ? 'Multi-file upload is a Pro feature'
+          : `Maximum ${limits.maxFilesPerUpload} files per upload`,
+      );
+    }
 
-    return {
-      id: doc.id,
-      filename: doc.filename,
-      status: doc.status,
-      hipaaMode: doc.hipaaMode,
-      createdAt: doc.createdAt,
-    };
+    const hipaaMode = dto.hipaaMode ?? false;
+    const results = [];
+
+    for (const file of files) {
+      const doc = await this.documentsService.upload(
+        req.user,
+        file,
+        hipaaMode,
+      );
+      results.push({
+        id: doc.id,
+        filename: doc.filename,
+        status: doc.status,
+        hipaaMode: doc.hipaaMode,
+        createdAt: doc.createdAt,
+      });
+    }
+
+    // Single file → return object; multi-file → return array
+    return results.length === 1 ? results[0] : results;
   }
 
   /**

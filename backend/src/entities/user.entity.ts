@@ -20,6 +20,12 @@ export class User extends BaseEntity {
   @Column({ name: 'avatar_url', type: 'varchar', length: 512, nullable: true })
   avatarUrl: string | null;
 
+  @Column({ type: 'varchar', length: 20, default: 'free' })
+  tier: string;
+
+  @Column({ name: 'billing_cycle_start', type: 'timestamp', nullable: true })
+  billingCycleStart: Date | null;
+
   @OneToMany(() => Document, (document) => document.user)
   documents: Document[];
 
