@@ -58,9 +58,12 @@ export const authApi = {
 
 // Documents API
 export const documentsApi = {
-  upload: (file: File, hipaaMode: boolean) => {
+  upload: (files: File | File[], hipaaMode: boolean) => {
     const form = new FormData();
-    form.append("file", file);
+    const fileList = Array.isArray(files) ? files : [files];
+    for (const f of fileList) {
+      form.append("files", f);
+    }
     form.append("hipaaMode", String(hipaaMode));
     return api.post("/documents/upload", form, {
       headers: { "Content-Type": "multipart/form-data" },

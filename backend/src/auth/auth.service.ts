@@ -19,7 +19,7 @@ export interface TokenPair {
 }
 
 export interface AuthResponse extends TokenPair {
-  user: { id: string; email: string; name?: string | null };
+  user: { id: string; email: string; name?: string | null; tier: string };
 }
 
 @Injectable()
@@ -52,7 +52,7 @@ export class AuthService {
     const tokens = await this.generateTokens(user);
     return {
       ...tokens,
-      user: { id: user.id, email: user.email },
+      user: { id: user.id, email: user.email, tier: user.tier },
     };
   }
 
@@ -76,7 +76,7 @@ export class AuthService {
     const tokens = await this.generateTokens(user);
     return {
       ...tokens,
-      user: { id: user.id, email: user.email },
+      user: { id: user.id, email: user.email, tier: user.tier },
     };
   }
 
@@ -132,7 +132,7 @@ export class AuthService {
     const tokens = await this.generateTokens(user);
     return {
       ...tokens,
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: user.id, email: user.email, name: user.name, tier: user.tier },
     };
   }
 

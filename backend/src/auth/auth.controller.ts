@@ -62,6 +62,7 @@ export class AuthController {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      tier: user.tier,
       createdAt: user.createdAt,
     };
   }

@@ -1,31 +1,48 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand,
+} from '@aws-sdk/client-s3';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const BUCKET_NAME = 'documents';
 
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
-  private supabase: SupabaseClient | null = null;
+  private s3: S3Client | null = null;
+  private readonly bucket: string;
   private readonly useLocal: boolean;
 
   constructor(private readonly config: ConfigService) {
-    const supabaseUrl = this.config.get<string>('SUPABASE_URL');
-    const supabaseKey = this.config.get<string>('SUPABASE_SERVICE_KEY');
-    this.useLocal = !supabaseUrl || !supabaseKey;
+    const endpoint = this.config.get<string>('S3_ENDPOINT');
+    const region = this.config.get<string>('S3_REGION') || 'us-east-1';
+    const accessKeyId = this.config.get<string>('S3_ACCESS_KEY_ID');
+    const secretAccessKey = this.config.get<string>('S3_SECRET_ACCESS_KEY');
+    this.bucket = this.config.get<string>('S3_BUCKET') || 'documents';
+
+    this.useLocal = !endpoint || !accessKeyId || !secretAccessKey;
 
     if (!this.useLocal) {
-      this.supabase = createClient(supabaseUrl!, supabaseKey!);
+      this.s3 = new S3Client({
+        endpoint,
+        region,
+        credentials: {
+          accessKeyId: accessKeyId!,
+          secretAccessKey: secretAccessKey!,
+        },
+        forcePathStyle: true, // Required for Supabase / MinIO / R2
+      });
     }
   }
 
   async onModuleInit() {
     if (this.useLocal) {
       this.logger.warn(
-        'SUPABASE_URL or SUPABASE_SERVICE_KEY not set — using local disk storage',
+        'S3 env vars not set — using local disk storage',
       );
       const uploadDir = path.join(process.cwd(), 'uploads');
       if (!fs.existsSync(uploadDir)) {
@@ -34,28 +51,19 @@ export class StorageService implements OnModuleInit {
       return;
     }
 
-    // Ensure bucket exists
+    // Verify S3 connectivity
     try {
-      const { data: buckets } = await this.supabase!.storage.listBuckets();
-      const exists = buckets?.some((b) => b.name === BUCKET_NAME);
-      if (!exists) {
-        const { error } = await this.supabase!.storage.createBucket(
-          BUCKET_NAME,
-          { public: false },
-        );
-        if (error) {
-          this.logger.error(`Failed to create bucket: ${error.message}`);
-        } else {
-          this.logger.log(`Created storage bucket: ${BUCKET_NAME}`);
-        }
-      }
+      await this.s3!.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      this.logger.log(`S3 bucket "${this.bucket}" is accessible`);
     } catch (err: any) {
-      this.logger.error(`Storage init error: ${err.message}`);
+      this.logger.error(
+        `S3 connectivity check failed for bucket "${this.bucket}": ${err.message}`,
+      );
     }
   }
 
   /**
-   * Upload a file from local disk to Supabase Storage.
+   * Upload a file from local disk to S3-compatible storage.
    * Returns the storage path (key).
    */
   async upload(localPath: string, storagePath: string): Promise<string> {
@@ -65,15 +73,14 @@ export class StorageService implements OnModuleInit {
     }
 
     const fileBuffer = fs.readFileSync(localPath);
-    const { error } = await this.supabase!.storage
-      .from(BUCKET_NAME)
-      .upload(storagePath, fileBuffer, {
-        upsert: true,
-      });
 
-    if (error) {
-      throw new Error(`Storage upload failed: ${error.message}`);
-    }
+    await this.s3!.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: storagePath,
+        Body: fileBuffer,
+      }),
+    );
 
     // Remove local temp file after successful upload
     fs.unlinkSync(localPath);
@@ -82,23 +89,31 @@ export class StorageService implements OnModuleInit {
   }
 
   /**
-   * Download a file from storage to a local temp path.
-   * Returns the local file path.
+   * Download a file from storage.
+   * Returns the file contents as a Buffer.
    */
   async download(storagePath: string): Promise<Buffer> {
     if (this.useLocal) {
       return fs.readFileSync(storagePath);
     }
 
-    const { data, error } = await this.supabase!.storage
-      .from(BUCKET_NAME)
-      .download(storagePath);
+    const response = await this.s3!.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: storagePath,
+      }),
+    );
 
-    if (error || !data) {
-      throw new Error(`Storage download failed: ${error?.message}`);
+    if (!response.Body) {
+      throw new Error(`S3 download returned empty body for key "${storagePath}"`);
     }
 
-    return Buffer.from(await data.arrayBuffer());
+    // response.Body is a Readable stream — collect into Buffer
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Buffer>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
   }
 
   /**
@@ -112,12 +127,15 @@ export class StorageService implements OnModuleInit {
       return;
     }
 
-    const { error } = await this.supabase!.storage
-      .from(BUCKET_NAME)
-      .remove([storagePath]);
-
-    if (error) {
-      this.logger.warn(`Storage delete failed: ${error.message}`);
+    try {
+      await this.s3!.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: storagePath,
+        }),
+      );
+    } catch (err: any) {
+      this.logger.warn(`S3 delete failed for key "${storagePath}": ${err.message}`);
     }
   }
 }
