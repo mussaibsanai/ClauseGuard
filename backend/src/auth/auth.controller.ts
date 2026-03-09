@@ -67,6 +67,18 @@ export class AuthController {
     };
   }
 
+  @Get('debug/oauth')
+  @ApiOperation({ summary: 'Debug: Check Google OAuth configuration' })
+  async debugOAuth() {
+    return {
+      googleClientIdSet: !!process.env.GOOGLE_CLIENT_ID,
+      googleClientSecretSet: !!process.env.GOOGLE_CLIENT_SECRET,
+      googleCallbackUrl: this.config.get<string>('GOOGLE_CALLBACK_URL') || 'NOT SET',
+      frontendUrl: this.config.get<string>('FRONTEND_URL') || 'NOT SET',
+      googleStrategyRegistered: !!process.env.GOOGLE_CLIENT_ID,
+    };
+  }
+
   @Get('google')
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Redirect to Google OAuth consent screen' })
